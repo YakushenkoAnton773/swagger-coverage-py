@@ -9,12 +9,18 @@ from typing import List
 
 import requests
 
-from swagger_coverage_py.configs import API_DOCS_FORMAT, DEBUG_MODE
+from swagger_coverage_py.configs import API_DOCS_FORMAT, \
+    DEBUG_MODE
 from swagger_coverage_py.docs_writers.api_doc_writer import write_api_doc_to_file
 
 
 class CoverageReporter:
-    def __init__(self, api_name: str, host: str, verify: bool = True):
+    def __init__(
+            self,
+            api_name: str,
+            host: str,
+            verify: bool = True
+            ):
         self.host = host
         self.verify = verify
         self.swagger_doc_file = f"swagger-doc-{api_name}.{API_DOCS_FORMAT}"
@@ -22,12 +28,20 @@ class CoverageReporter:
         self.swagger_coverage_config = f"swagger-coverage-config-{api_name}.json"
         self.ignored_paths = self.__get_ignored_paths_from_config()
 
-    def __get_output_dir(self):
+    def __get_output_dir(
+            self
+            ):
         output_dir = "swagger-coverage-output"
-        subdir = re.match(r"(^\w*)://(.*)", self.host).group(2)
-        return f"{output_dir}/{subdir}"
+        #TODO поправил тут
+        subdir = re.match(r"(^\w*)://(.*)", self.host).group(2).replace('.', '_').replace(':', '_')
+        if platform.system() == "Windows":
+            return f"{output_dir}\\{subdir}"
+        else:
+            return f"{output_dir}/{subdir}"
 
-    def __get_ignored_paths_from_config(self) -> List[str]:
+    def __get_ignored_paths_from_config(
+            self
+            ) -> List[str]:
         """Reads the swagger-coverage-config-<api_name>.json file and returns
         a list of endpoints/paths to exclude from the report
 
@@ -36,7 +50,12 @@ class CoverageReporter:
         if not self.swagger_coverage_config:
             return paths_to_ignore
 
-        with open(self.swagger_coverage_config, "r") as file:
+        print("Ignored paths-----", paths_to_ignore)
+        if platform.system() == "Windows":
+            conf_file = (Path(__file__).resolve().parents[4]).joinpath(f'{self.swagger_coverage_config}')
+        else:
+            conf_file = self.swagger_coverage_config
+        with open(conf_file, "r") as file:
             data = json.load(file)
             paths = data.get("rules").get("paths", {})
             if paths.get("enable", False):
@@ -45,7 +64,10 @@ class CoverageReporter:
         return paths_to_ignore
 
     def setup(
-        self, path_to_swagger_json: str, auth: object = None, cookies: dict = None
+            self,
+            path_to_swagger_json: str,
+            auth: object = None,
+            cookies: dict = None
     ):
         """Setup all required attributes to generate report
 
@@ -71,23 +93,32 @@ class CoverageReporter:
                 paths_to_delete=self.ignored_paths,
             )
 
-    def generate_report(self):
+    def generate_report(
+            self
+            ):
+        #TODO переделал для корректной работы с windows
         inner_location = "swagger-coverage-commandline/bin/swagger-coverage-commandline"
-        
+
         cmd_path = os.path.join(os.path.dirname(__file__), inner_location)
         assert Path(
             cmd_path
-        ).exists(), (
-            f"No commandline tools is found in following locations:\n{cmd_path}\n"
-        )
-        command = [cmd_path, "-s", self.swagger_doc_file, "-i", self.output_dir]
-        if self.swagger_coverage_config:
-            command.extend(["-c", self.swagger_coverage_config])
+        ).exists(), (f"No commandline tools is found in following locations:\n{cmd_path}\n")
 
-        # Adjust the file paths for Windows
+        # Определяем базовую команду
+        base_command = [cmd_path, "-s", self.swagger_doc_file, "-i", self.output_dir]
+
+        # Добавляем конфигурацию покрытия, если она задана
+        if self.swagger_coverage_config:
+            base_command.extend(["-c", self.swagger_coverage_config])
+
         if platform.system() == "Windows":
-            command = [arg.replace("/", "\\") for arg in command]
-        
+            # Получаем путь к Git Bash из переменных среды
+            git_bash_path = os.environ.get("GIT_BASH_PATH", "C:/Program Files/Git/bin/bash.exe")
+            command = [git_bash_path, "-c", ' '.join(f'"{arg}"' for arg in base_command)]
+        else:
+            subprocess.run(['chmod', '+x', cmd_path], check=True)
+            command = base_command
+
         # Suppress all output if not in debug mode
         if not DEBUG_MODE:
             with open(os.devnull, 'w') as devnull:
@@ -95,7 +126,9 @@ class CoverageReporter:
         else:
             subprocess.run(command)
 
-
-    def cleanup_input_files(self):
+    def cleanup_input_files(
+            self
+            ):
         shutil.rmtree(self.output_dir, ignore_errors=True)
-        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        # Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        (Path(__file__).resolve().parents[5]).joinpath(self.output_dir).mkdir(parents=True, exist_ok=True)
